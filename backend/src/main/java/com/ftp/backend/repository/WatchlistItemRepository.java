@@ -10,4 +10,5 @@ import java.util.Optional;
 public interface WatchlistItemRepository extends JpaRepository<WatchlistItem, Long> {
     List<WatchlistItem> findByWatchlistId(Long watchlistId);
     Optional<WatchlistItem> findByWatchlistIdAndSymbol(Long watchlistId, String symbol);
+    void deleteByWatchlistId(Long watchlistId);
 }

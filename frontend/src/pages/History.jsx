@@ -1,148 +1,161 @@
-import { useState, useEffect } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  CircularProgress,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-} from '@mui/material';
-import { getTransactionHistory, getAllTransactions } from '../api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Box, MenuItem, TextField, Typography } from '@mui/material';
+import { getTransactionHistory, getAllUsers } from '../api';
 import { useAuth } from '../context/AuthContext';
-import { getAllUsers } from '../api';
+import { PageHeader, DataTable, StatusChip, SymbolChip, ErrorState } from '../components/ui';
+import { formatCurrency, formatDateTime, formatNumber } from '../utils/format';
 
 export default function History() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('ROLE_ADMIN');
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [users, setUsers] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
 
-  useEffect(() => {
-    loadTransactions();
-    if (isAdmin) {
-      loadUsers();
-    }
-  }, [selectedUserId]);
-
-  const loadUsers = async () => {
-    try {
-      const data = await getAllUsers();
-      setUsers(data);
-    } catch (err) {
-      console.error('Failed to load users', err);
-    }
-  };
-
-  const loadTransactions = async () => {
+  const loadTransactions = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError(null);
     try {
-      const data = isAdmin && selectedUserId ? await getAllTransactions(selectedUserId) : await getTransactionHistory();
+      const data = await getTransactionHistory(
+        isAdmin && selectedUserId ? selectedUserId : undefined
+      );
       setTransactions(data);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load transactions');
+      setError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin, selectedUserId]);
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
 
-  if (error) {
-    return <Alert severity="error">{error}</Alert>;
-  }
+  useEffect(() => {
+    if (!isAdmin) return;
+    getAllUsers()
+      .then(setUsers)
+      .catch((err) => console.error('Failed to load users', err));
+  }, [isAdmin]);
+
+  const columns = useMemo(
+    () => [
+      {
+        key: 'id',
+        label: 'Ref',
+        width: 80,
+        render: (row) => (
+          <Typography variant="caption" color="text.secondary">
+            #{row.id}
+          </Typography>
+        ),
+      },
+      {
+        key: 'transactionType',
+        label: 'Type',
+        render: (row) => <StatusChip status={row.transactionType} />,
+      },
+      {
+        key: 'symbol',
+        label: 'Instrument',
+        render: (row) => <SymbolChip symbol={row.symbol} size="small" />,
+      },
+      {
+        key: 'quantity',
+        label: 'Quantity',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatNumber(row.quantity, 4)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'price',
+        label: 'Price',
+        align: 'right',
+        render: (row) => formatCurrency(row.price),
+      },
+      {
+        key: 'totalAmount',
+        label: 'Total',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="body2" fontWeight={600} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatCurrency(row.totalAmount)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'fee',
+        label: 'Fee',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="body2" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatCurrency(row.fee)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'createdAt',
+        label: 'Executed',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="caption" color="text.secondary">
+            {formatDateTime(row.createdAt)}
+          </Typography>
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" gutterBottom fontWeight="bold" sx={{ mb: 0 }}>
-          Transaction History
-        </Typography>
-        {isAdmin && (
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Select User</InputLabel>
-            <Select
+      <PageHeader
+        title="Transaction history"
+        subtitle={
+          selectedUserId
+            ? 'Transactions for the selected account.'
+            : 'Every execution on your account, newest first.'
+        }
+        breadcrumbs={[{ label: 'Account' }, { label: 'History' }]}
+        actions={
+          isAdmin && (
+            <TextField
+              select
+              label="Viewing"
               value={selectedUserId}
-              label="Select User"
-              onChange={(e) => setSelectedUserId(e.target.value)}
+              onChange={(event) => setSelectedUserId(event.target.value)}
+              sx={{ minWidth: 200 }}
             >
-              <MenuItem value="">My Transactions</MenuItem>
+              <MenuItem value="">My transactions</MenuItem>
               {users.map((user) => (
-                <MenuItem key={user.id} value={user.id}>{user.username}</MenuItem>
+                <MenuItem key={user.id} value={user.id}>
+                  {user.username}
+                </MenuItem>
               ))}
-            </Select>
-          </FormControl>
-        )}
-      </Box>
-      <Card>
-        <CardContent>
-          <TableContainer component={Paper} elevation={0}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Transaction ID</TableCell>
-                  <TableCell>Order ID</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Symbol</TableCell>
-                  <TableCell align="right">Quantity</TableCell>
-                  <TableCell align="right">Price</TableCell>
-                  <TableCell align="right">Total Amount</TableCell>
-                  <TableCell align="right">Fee</TableCell>
-                  <TableCell>Date</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {transactions.map((tx) => (
-                  <TableRow key={tx.id} hover>
-                    <TableCell>{tx.id}</TableCell>
-                    <TableCell>{tx.orderId}</TableCell>
-                    <TableCell>
-                      <Box component="span" sx={{ color: tx.transactionType === 'BUY' ? 'success.main' : 'error.main', fontWeight: 'bold' }}>
-                        {tx.transactionType}
-                      </Box>
-                    </TableCell>
-                    <TableCell component="th" scope="row" fontWeight="bold">
-                      {tx.symbol}
-                    </TableCell>
-                    <TableCell align="right">{tx.quantity}</TableCell>
-                    <TableCell align="right">${tx.price?.toFixed(2)}</TableCell>
-                    <TableCell align="right">${tx.totalAmount?.toFixed(2)}</TableCell>
-                    <TableCell align="right">${tx.fee?.toFixed(2)}</TableCell>
-                    <TableCell>{new Date(tx.createdAt).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-                {transactions.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={9} align="center">
-                      <Typography color="text.secondary">No transactions found</Typography>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </CardContent>
-      </Card>
+            </TextField>
+          )
+        }
+      />
+
+      {error ? (
+        <ErrorState error={error} title="Could not load transactions" onRetry={loadTransactions} />
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={transactions}
+          loading={loading}
+          emptyTitle="No transactions yet"
+          emptyDescription="Completed trades will be listed here with their fees and totals."
+          getRowKey={(row) => row.id}
+          initialRowsPerPage={15}
+        />
+      )}
     </Box>
   );
 }
+

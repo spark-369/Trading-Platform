@@ -1,207 +1,223 @@
-import { useEffect, useState } from 'react';
-import {
-  Container,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  CircularProgress,
-  Box,
-  Button,
-  Card,
-  CardContent,
-  Grid,
-  Alert,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  IconButton,
-  MenuItem,
-  Select,
-  InputLabel,
-  FormControl,
-} from '@mui/material';
-import {
-  Delete as DeleteIcon,
-} from '@mui/icons-material';
-import {
-  getAllUsers,
-  deleteUser,
-  getDashboardStats,
-} from '../api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Box, Grid, Typography, IconButton, Tooltip, Chip } from '@mui/material';
+import DeleteIcon from '@mui/icons-material/DeleteOutlineRounded';
+import PeopleIcon from '@mui/icons-material/PeopleAltRounded';
+import SwapHorizIcon from '@mui/icons-material/SwapHorizRounded';
+import ReceiptIcon from '@mui/icons-material/ReceiptLongRounded';
+import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWalletRounded';
+import { useSnackbar } from 'notistack';
+import { getAllUsers, deleteUser, getDashboardStats } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { PageHeader, StatCard, DataTable, ConfirmDialog, ErrorState } from '../components/ui';
+import { formatCurrency, formatNumber, formatDate } from '../utils/format';
+import { getErrorMessage } from '../utils/errors';
 
 export default function Users() {
-  const { hasRole } = useAuth();
+  const { hasRole, user: currentUser } = useAuth();
   const isAdmin = hasRole('ROLE_ADMIN');
+  const { enqueueSnackbar } = useSnackbar();
+
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [openDelete, setOpenDelete] = useState(false);
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [error, setError] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError(null);
     try {
-      const [usersData, statsData] = await Promise.all([
-        getAllUsers(),
-        getDashboardStats(),
-      ]);
+      const [usersData, statsData] = await Promise.all([getAllUsers(), getDashboardStats()]);
       setUsers(usersData);
       setStats(statsData);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load data');
+      setError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleDelete = async () => {
-    if (!selectedUser) return;
+    if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      await deleteUser(selectedUser.id);
-      setOpenDelete(false);
-      setSelectedUser(null);
+      await deleteUser(deleteTarget.id);
+      enqueueSnackbar(`${deleteTarget.username} deleted`, { variant: 'success' });
+      setDeleteTarget(null);
       loadData();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete user');
+      enqueueSnackbar(getErrorMessage(err, 'Failed to delete user'), { variant: 'error' });
+    } finally {
+      setDeleting(false);
     }
   };
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const cards = useMemo(
+    () => [
+      { label: 'Total users', value: formatNumber(stats?.totalUsers ?? 0, 0), icon: <PeopleIcon />, tone: 'primary' },
+      { label: 'Total orders', value: formatNumber(stats?.totalOrders ?? 0, 0), icon: <SwapHorizIcon />, tone: 'warning' },
+      { label: 'Transactions', value: formatNumber(stats?.totalTransactions ?? 0, 0), icon: <ReceiptIcon />, tone: 'success' },
+      {
+        label: 'Aggregate balance',
+        value: formatCurrency(stats?.totalWalletBalance ?? 0),
+        icon: <AccountBalanceWalletIcon />,
+        tone: 'info',
+      },
+    ],
+    [stats]
+  );
+
+  const columns = useMemo(
+    () => [
+      {
+        key: 'id',
+        label: 'ID',
+        width: 70,
+        render: (row) => (
+          <Typography variant="caption" color="text.secondary">
+            #{row.id}
+          </Typography>
+        ),
+      },
+      {
+        key: 'username',
+        label: 'User',
+        render: (row) => (
+          <Box>
+            <Typography variant="body2" fontWeight={600}>
+              {[row.firstName, row.lastName].filter(Boolean).join(' ') || row.username}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {row.username}
+            </Typography>
+          </Box>
+        ),
+      },
+      {
+        key: 'email',
+        label: 'Email',
+        render: (row) => (
+          <Typography variant="body2" color="text.secondary">
+            {row.email}
+          </Typography>
+        ),
+      },
+      {
+        key: 'roles',
+        label: 'Roles',
+        render: (row) => (
+          <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+            {(row.roles ?? []).map((role) => (
+              <Chip
+                key={role}
+                size="small"
+                label={role === 'ROLE_ADMIN' ? 'Admin' : 'Trader'}
+                color={role === 'ROLE_ADMIN' ? 'secondary' : 'default'}
+                variant={role === 'ROLE_ADMIN' ? 'filled' : 'outlined'}
+              />
+            ))}
+          </Box>
+        ),
+      },
+      {
+        key: 'enabled',
+        label: 'Status',
+        render: (row) => (
+          <Chip
+            size="small"
+            label={row.enabled ? 'Active' : 'Disabled'}
+            color={row.enabled ? 'success' : 'default'}
+            variant="outlined"
+          />
+        ),
+      },
+      {
+        key: 'createdAt',
+        label: 'Joined',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="caption" color="text.secondary">
+            {formatDate(row.createdAt)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'actions',
+        label: '',
+        align: 'right',
+        width: 60,
+        render: (row) => {
+          const isSelf = row.id === currentUser?.userId;
+          return (
+            <Tooltip title={isSelf ? 'You cannot delete your own account' : 'Delete user'}>
+              <span>
+                <IconButton
+                  size="small"
+                  color="error"
+                  disabled={isSelf}
+                  onClick={() => setDeleteTarget(row)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          );
+        },
+      },
+    ],
+    [currentUser?.userId]
+  );
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4 }}>
-      <Typography variant="h4" gutterBottom fontWeight="bold">
-        Users
-      </Typography>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    <Box>
+      <PageHeader
+        title="Users"
+        subtitle="Manage accounts, roles and platform activity."
+        breadcrumbs={[{ label: 'Administration' }, { label: 'Users' }]}
+      />
 
-      {isAdmin && stats && (
-        <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography color="text.secondary" variant="body2" gutterBottom>
-                  Total Users
-                </Typography>
-                <Typography variant="h5" fontWeight="bold">
-                  {stats.totalUsers}
-                </Typography>
-              </CardContent>
-            </Card>
+      {error ? (
+        <ErrorState error={error} title="Could not load users" onRetry={loadData} />
+      ) : (
+        <>
+          <Grid container spacing={2.5} sx={{ mb: 3 }}>
+            {cards.map((card) => (
+              <Grid key={card.label} size={{ xs: 12, sm: 6, lg: 3 }}>
+                <StatCard {...card} loading={loading} />
+              </Grid>
+            ))}
           </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography color="text.secondary" variant="body2" gutterBottom>
-                  Total Orders
-                </Typography>
-                <Typography variant="h5" fontWeight="bold">
-                  {stats.totalOrders}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography color="text.secondary" variant="body2" gutterBottom>
-                  Total Transactions
-                </Typography>
-                <Typography variant="h5" fontWeight="bold">
-                  {stats.totalTransactions}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-            <Card>
-              <CardContent>
-                <Typography color="text.secondary" variant="body2" gutterBottom>
-                  Total Wallet Balance
-                </Typography>
-                <Typography variant="h5" fontWeight="bold" color="success.main">
-                  ${stats.totalWalletBalance?.toFixed(2)}
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+
+          <DataTable
+            columns={columns}
+            rows={users}
+            loading={loading}
+            emptyTitle="No users found"
+            getRowKey={(row) => row.id}
+          />
+        </>
       )}
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>ID</TableCell>
-              <TableCell>Username</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Roles</TableCell>
-              <TableCell>Enabled</TableCell>
-              {isAdmin && <TableCell align="center">Actions</TableCell>}
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id} hover>
-                <TableCell>{user.id}</TableCell>
-                <TableCell>{user.username}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell>{user.roles?.join(', ')}</TableCell>
-                <TableCell>{user.enabled ? 'Yes' : 'No'}</TableCell>
-                {isAdmin && (
-                  <TableCell align="center">
-                    <IconButton
-                      size="small"
-                      color="error"
-                      onClick={() => {
-                        setSelectedUser(user);
-                        setOpenDelete(true);
-                      }}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      <Dialog open={openDelete} onClose={() => setOpenDelete(false)}>
-        <DialogTitle>Delete User</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete user <strong>{selectedUser?.username}</strong>?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDelete(false)}>Cancel</Button>
-          <Button onClick={handleDelete} color="error" variant="contained">
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Container>
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete user"
+        description={
+          deleteTarget
+            ? `${deleteTarget.username} and all of their wallets, orders, transactions, portfolios and watchlists will be permanently removed.`
+            : ''
+        }
+        confirmLabel="Delete user"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
+    </Box>
   );
 }
+

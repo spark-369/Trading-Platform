@@ -1,27 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Box, Grid, TextField, MenuItem, Typography } from '@mui/material';
 import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  CircularProgress,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-} from '@mui/material';
-import { TrendingUp as TrendingUpIcon, TrendingDown as TrendingDownIcon } from '@mui/icons-material';
-import { getPortfolioSummary, getPortfolio, getPortfolioSummaryByUser, getPortfolioByUser, getAllUsers } from '../api';
+  getPortfolioSummary,
+  getPortfolio,
+  getPortfolioSummaryByUser,
+  getPortfolioByUser,
+  getAllUsers,
+} from '../api';
 import { useAuth } from '../context/AuthContext';
+import {
+  PageHeader,
+  StatCard,
+  DataTable,
+  TrendValue,
+  SymbolChip,
+  ErrorState,
+} from '../components/ui';
+import { formatCurrency, formatNumber } from '../utils/format';
 
 export default function Portfolio() {
   const { hasRole } = useAuth();
@@ -29,17 +24,13 @@ export default function Portfolio() {
   const [summary, setSummary] = useState(null);
   const [holdings, setHoldings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null);
   const [users, setUsers] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
 
-  useEffect(() => {
-    loadData();
-  }, [selectedUserId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError(null);
     try {
       if (isAdmin && selectedUserId) {
         const [summaryData, holdingsData] = await Promise.all([
@@ -57,156 +48,148 @@ export default function Portfolio() {
         setHoldings(holdingsData);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load portfolio');
+      setError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin, selectedUserId]);
 
   useEffect(() => {
-    if (isAdmin) {
-      getAllUsers().then(setUsers).catch(console.error);
-    }
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    getAllUsers()
+      .then(setUsers)
+      .catch((err) => console.error('Failed to load users', err));
   }, [isAdmin]);
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const stats = useMemo(
+    () => [
+      {
+        label: 'Market value',
+        value: formatCurrency(summary?.totalValue ?? 0),
+        tone: 'primary',
+      },
+      {
+        label: 'Cost basis',
+        value: formatCurrency(summary?.totalCost ?? 0),
+        tone: 'info',
+      },
+      {
+        label: 'Unrealised P&L',
+        value: formatCurrency(summary?.totalProfitLoss ?? 0),
+        delta: summary?.totalProfitLossPercent ?? 0,
+        tone: (summary?.totalProfitLoss ?? 0) >= 0 ? 'success' : 'error',
+      },
+      {
+        label: 'Positions',
+        value: formatNumber(holdings.length, 0),
+        tone: 'primary',
+      },
+    ],
+    [summary, holdings.length]
+  );
 
-  if (error) {
-    return <Alert severity="error">{error}</Alert>;
-  }
+  const columns = useMemo(
+    () => [
+      {
+        key: 'symbol',
+        label: 'Instrument',
+        width: 200,
+        render: (row) => <SymbolChip symbol={row.symbol} />,
+      },
+      {
+        key: 'quantity',
+        label: 'Quantity',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatNumber(row.quantity, 4)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'avgBuyPrice',
+        label: 'Avg cost',
+        align: 'right',
+        render: (row) => formatCurrency(row.avgBuyPrice),
+      },
+      {
+        key: 'currentValue',
+        label: 'Market value',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="body2" fontWeight={600} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatCurrency(row.currentValue)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'profitLoss',
+        label: 'P&L',
+        align: 'right',
+        render: (row) => (
+          <TrendValue value={row.profitLoss} changePercent={row.profitLossPercent} size="body2" />
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" gutterBottom fontWeight="bold" sx={{ mb: 0 }}>
-          Portfolio
-        </Typography>
-        {isAdmin && (
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Select User</InputLabel>
-            <Select
+      <PageHeader
+        title="Portfolio"
+        subtitle={
+          selectedUserId
+            ? 'Holdings for the selected account.'
+            : 'Your current positions, cost basis and unrealised profit or loss.'
+        }
+        actions={
+          isAdmin && (
+            <TextField
+              select
+              label="View portfolio for"
               value={selectedUserId}
-              label="Select User"
-              onChange={(e) => setSelectedUserId(e.target.value)}
+              onChange={(event) => setSelectedUserId(event.target.value)}
+              sx={{ minWidth: 220 }}
             >
-              <MenuItem value="">My Portfolio</MenuItem>
+              <MenuItem value="">My portfolio</MenuItem>
               {users.map((user) => (
-                <MenuItem key={user.id} value={user.id}>{user.username}</MenuItem>
+                <MenuItem key={user.id} value={user.id}>
+                  {user.username}
+                </MenuItem>
               ))}
-            </Select>
-          </FormControl>
-        )}
-      </Box>
-      <Grid container spacing={3}>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Typography color="text.secondary" variant="body2" gutterBottom>
-                Total Value
-              </Typography>
-              <Typography variant="h5" fontWeight="bold">
-                ${summary.totalValue?.toFixed(2)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Typography color="text.secondary" variant="body2" gutterBottom>
-                Total Cost
-              </Typography>
-              <Typography variant="h5" fontWeight="bold">
-                ${summary.totalCost?.toFixed(2)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Typography color="text.secondary" variant="body2" gutterBottom>
-                Profit / Loss
-              </Typography>
-              <Box display="flex" alignItems="center" gap={1}>
-                {summary.totalProfitLoss >= 0 ? <TrendingUpIcon color="success" /> : <TrendingDownIcon color="error" />}
-                <Typography variant="h5" fontWeight="bold" color={summary.totalProfitLoss >= 0 ? 'success.main' : 'error.main'}>
-                  ${summary.totalProfitLoss?.toFixed(2)}
-                </Typography>
-              </Box>
-              <Typography variant="body2" color={summary.totalProfitLossPercent >= 0 ? 'success.main' : 'error.main'}>
-                {summary.totalProfitLossPercent >= 0 ? '+' : ''}{summary.totalProfitLossPercent?.toFixed(2)}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card>
-            <CardContent>
-              <Typography color="text.secondary" variant="body2" gutterBottom>
-                Holdings
-              </Typography>
-              <Typography variant="h5" fontWeight="bold">
-                {summary.holdings?.length || 0}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12 }}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Holdings
-              </Typography>
-              <TableContainer component={Paper} elevation={0}>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Symbol</TableCell>
-                      <TableCell align="right">Quantity</TableCell>
-                      <TableCell align="right">Avg Buy Price</TableCell>
-                      <TableCell align="right">Current Value</TableCell>
-                      <TableCell align="right">Profit/Loss</TableCell>
-                      <TableCell align="right">P/L %</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {holdings.map((holding) => (
-                      <TableRow key={holding.id} hover>
-                        <TableCell component="th" scope="row" fontWeight="bold">
-                          {holding.symbol}
-                        </TableCell>
-                        <TableCell align="right">{holding.quantity}</TableCell>
-                        <TableCell align="right">${holding.avgBuyPrice?.toFixed(2)}</TableCell>
-                        <TableCell align="right">${holding.currentValue?.toFixed(2)}</TableCell>
-                        <TableCell align="right" style={{ color: holding.profitLoss >= 0 ? 'green' : 'red' }}>
-                          ${holding.profitLoss?.toFixed(2)}
-                        </TableCell>
-                        <TableCell align="right" style={{ color: holding.profitLossPercent >= 0 ? 'green' : 'red' }}>
-                          {holding.profitLossPercent >= 0 ? '+' : ''}{holding.profitLossPercent?.toFixed(2)}%
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!holdings.length && (
-                      <TableRow>
-                        <TableCell colSpan={6} align="center">
-                          <Typography color="text.secondary">No holdings found</Typography>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+            </TextField>
+          )
+        }
+      />
+
+      {error ? (
+        <ErrorState error={error} title="Could not load portfolio" onRetry={loadData} />
+      ) : (
+        <>
+          <Grid container spacing={2.5} sx={{ mb: 3 }}>
+            {stats.map((stat) => (
+              <Grid key={stat.label} size={{ xs: 12, sm: 6, lg: 3 }}>
+                <StatCard {...stat} loading={loading} />
+              </Grid>
+            ))}
+          </Grid>
+
+          <DataTable
+            columns={columns}
+            rows={holdings}
+            loading={loading}
+            emptyTitle="No holdings yet"
+            emptyDescription="Buy an instrument from the Trade page and it will show up here."
+            getRowKey={(row) => row.symbol}
+          />
+        </>
+      )}
     </Box>
   );
 }
+

@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.ftp.backend.dto.response.TransactionResponse;
+import com.ftp.backend.exception.ForbiddenActionException;
 import com.ftp.backend.security.CurrentUserUtils;
 import com.ftp.backend.service.TransactionService;
 
@@ -29,7 +30,7 @@ public class TransactionController {
     public ResponseEntity<List<TransactionResponse>> getTransactionHistory(@RequestParam(required = false) Long userId) {
         Long targetUserId = userId != null ? userId : currentUserUtils.getCurrentUserId();
         if (userId != null && !currentUserUtils.isAdmin()) {
-            throw new org.springframework.security.access.AccessDeniedException("Admin only");
+            throw new ForbiddenActionException("Admin only");
         }
         List<TransactionResponse> response = transactionService.getTransactionHistory(targetUserId);
         return ResponseEntity.ok(response);

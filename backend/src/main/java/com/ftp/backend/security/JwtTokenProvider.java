@@ -19,7 +19,22 @@ public class JwtTokenProvider {
 
     public JwtTokenProvider(@Value("${jwt.secret}") String jwtSecret,
                             @Value("${jwt.expiration}") long jwtExpirationMs) {
-        this.key = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT secret is not configured. Set the JWT_SECRET environment variable "
+                            + "(a base64 encoded key of at least 32 bytes).");
+        }
+        byte[] decoded;
+        try {
+            decoded = Decoders.BASE64.decode(jwtSecret);
+        } catch (Exception ex) {
+            throw new IllegalStateException("JWT secret must be a valid base64 encoded value", ex);
+        }
+        if (decoded.length < 32) {
+            throw new IllegalStateException(
+                    "JWT secret must decode to at least 32 bytes for HMAC-SHA256 signatures");
+        }
+        this.key = Keys.hmacShaKeyFor(decoded);
         this.jwtExpirationMs = jwtExpirationMs;
     }
 

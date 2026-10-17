@@ -1,26 +1,26 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback } from 'react';
 import { login as loginApi, register as registerApi } from '../api/auth';
 
 const AuthContext = createContext(null);
 
-export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
+const readStoredUser = () => {
+  try {
     const saved = localStorage.getItem('user');
     return saved ? JSON.parse(saved) : null;
-  });
-  const [loading, setLoading] = useState(true);
+  } catch {
+    // Corrupt payload - drop it rather than crashing the app on boot.
+    localStorage.removeItem('user');
+    return null;
+  }
+};
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem('user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('user');
-    }
-    setLoading(false);
-  }, [user]);
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(readStoredUser);
+  // A stored session is restored synchronously from localStorage, so there is
+  // no async work to wait for. Keeping this flag avoids a loading flash.
+  const [loading] = useState(false);
 
-  const login = async (usernameOrEmail, password) => {
-    const data = await loginApi(usernameOrEmail, password);
+  const persist = useCallback((data) => {
     localStorage.setItem('token', data.token);
     const userData = {
       token: data.token,
@@ -28,25 +28,23 @@ export const AuthProvider = ({ children }) => {
       userId: data.userId,
       username: data.username,
       email: data.email,
+      firstName: data.firstName,
+      lastName: data.lastName,
       roles: data.roles,
     };
     setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
     return userData;
+  }, []);
+
+  const login = async (usernameOrEmail, password) => {
+    const data = await loginApi(usernameOrEmail, password);
+    return persist(data);
   };
 
   const register = async (username, email, password, firstName, lastName) => {
     const data = await registerApi(username, email, password, firstName, lastName);
-    localStorage.setItem('token', data.token);
-    const userData = {
-      token: data.token,
-      tokenType: data.tokenType,
-      userId: data.userId,
-      username: data.username,
-      email: data.email,
-      roles: data.roles,
-    };
-    setUser(userData);
-    return userData;
+    return persist(data);
   };
 
   const logout = () => {
@@ -55,9 +53,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('user');
   };
 
-  const hasRole = (role) => {
-    return user?.roles?.includes(role) ?? false;
-  };
+  const hasRole = (role) => user?.roles?.includes(role) ?? false;
 
   return (
     <AuthContext.Provider value={{ user, login, register, logout, loading, hasRole }}>
@@ -73,3 +69,4 @@ export const useAuth = () => {
   }
   return context;
 };
+

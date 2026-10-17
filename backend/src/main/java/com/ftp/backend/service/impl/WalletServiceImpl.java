@@ -7,6 +7,7 @@ import com.ftp.backend.dto.request.DepositRequest;
 import com.ftp.backend.dto.request.WithdrawRequest;
 import com.ftp.backend.dto.response.WalletResponse;
 import com.ftp.backend.entity.Wallet;
+import com.ftp.backend.exception.UnprocessableEntityException;
 import com.ftp.backend.repository.WalletRepository;
 import com.ftp.backend.service.WalletService;
 
@@ -32,7 +33,8 @@ public class WalletServiceImpl implements WalletService {
     @Override
     @Transactional
     public WalletResponse deposit(Long targetUserId, DepositRequest request) {
-        Wallet wallet = getOrCreateWallet(targetUserId);
+        requirePositive(request.getAmount(), "Deposit amount must be greater than zero");
+        Wallet wallet = getOrCreateWalletForUpdate(targetUserId);
         wallet.setBalance(wallet.getBalance().add(request.getAmount()));
         wallet.setAvailableBalance(wallet.getAvailableBalance().add(request.getAmount()));
         wallet.setUpdatedAt(LocalDateTime.now());
@@ -43,9 +45,10 @@ public class WalletServiceImpl implements WalletService {
     @Override
     @Transactional
     public WalletResponse withdraw(Long targetUserId, WithdrawRequest request) {
-        Wallet wallet = getOrCreateWallet(targetUserId);
+        requirePositive(request.getAmount(), "Withdrawal amount must be greater than zero");
+        Wallet wallet = getOrCreateWalletForUpdate(targetUserId);
         if (wallet.getAvailableBalance().compareTo(request.getAmount()) < 0) {
-            throw new RuntimeException("Insufficient funds");
+            throw new UnprocessableEntityException("Insufficient funds");
         }
         wallet.setBalance(wallet.getBalance().subtract(request.getAmount()));
         wallet.setAvailableBalance(wallet.getAvailableBalance().subtract(request.getAmount()));
@@ -54,11 +57,33 @@ public class WalletServiceImpl implements WalletService {
         return mapToWalletResponse(wallet);
     }
 
+    private void requirePositive(BigDecimal amount, String message) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new UnprocessableEntityException(message);
+        }
+    }
+
+    /**
+     * Locks the wallet row for the duration of the surrounding transaction so
+     * concurrent deposits/withdrawals cannot race and lose updates.
+     */
+    private Wallet getOrCreateWalletForUpdate(Long userId) {
+        Optional<Wallet> existing = walletRepository.findByUserIdForUpdate(userId);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        return createWallet(userId);
+    }
+
     private Wallet getOrCreateWallet(Long userId) {
         Optional<Wallet> existing = walletRepository.findByUserId(userId);
         if (existing.isPresent()) {
             return existing.get();
         }
+        return createWallet(userId);
+    }
+
+    private Wallet createWallet(Long userId) {
         Wallet wallet = Wallet.builder()
                 .userId(userId)
                 .balance(BigDecimal.ZERO)

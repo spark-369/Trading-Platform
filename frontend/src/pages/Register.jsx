@@ -1,140 +1,228 @@
 import { useState } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
-  Card,
-  CardContent,
   TextField,
   Button,
-  Typography,
   Alert,
   InputAdornment,
   IconButton,
+  Stack,
+  Link,
+  Grid,
+  CircularProgress,
+  LinearProgress,
 } from '@mui/material';
-import { Visibility, VisibilityOff } from '@mui/icons-material';
+import VisibilityIcon from '@mui/icons-material/VisibilityRounded';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOffRounded';
+import AuthLayout from '../components/AuthLayout';
 import { useAuth } from '../context/AuthContext';
+import { getErrorMessage } from '../utils/errors';
+
+const initialForm = {
+  username: '',
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+};
+
+/** Very light strength heuristic to nudge users towards better passwords. */
+function passwordStrength(password) {
+  if (!password) return { score: 0, label: '', color: 'inherit' };
+  let score = 0;
+  if (password.length >= 6) score += 1;
+  if (password.length >= 10) score += 1;
+  if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score += 1;
+  if (/\d/.test(password)) score += 1;
+  if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+  if (score <= 2) return { score: 33, label: 'Weak', color: 'error' };
+  if (score <= 3) return { score: 66, label: 'Fair', color: 'warning' };
+  return { score: 100, label: 'Strong', color: 'success' };
+}
 
 export default function Register() {
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-    firstName: '',
-    lastName: '',
-  });
+  const [form, setForm] = useState(initialForm);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const strength = passwordStrength(form.password);
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    setFieldErrors((prev) => ({ ...prev, [name]: undefined }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+  const validate = () => {
+    const errors = {};
+    if (form.username.trim().length < 3) errors.username = 'At least 3 characters';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Enter a valid email';
+    if (form.password.length < 6) errors.password = 'At least 6 characters';
+    if (!form.firstName.trim()) errors.firstName = 'Required';
+    if (!form.lastName.trim()) errors.lastName = 'Required';
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError('');
+    if (!validate()) return;
+
+    setSubmitting(true);
     try {
-      await register(formData.username, formData.email, formData.password, formData.firstName, formData.lastName);
-      navigate('/dashboard');
+      await register(
+        form.username.trim(),
+        form.email.trim(),
+        form.password,
+        form.firstName.trim(),
+        form.lastName.trim()
+      );
+      navigate('/dashboard', { replace: true });
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed');
+      setError(getErrorMessage(err, 'Registration failed. Please try again.'));
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        bgcolor: 'background.default',
-        p: 2,
-      }}
+    <AuthLayout
+      title="Create your account"
+      subtitle="Start with a funded demo wallet and explore the market."
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link component={RouterLink} to="/login" fontWeight={600} underline="hover">
+            Sign in
+          </Link>
+        </>
+      }
     >
-      <Card sx={{ maxWidth: 400, width: '100%' }}>
-        <CardContent sx={{ p: 4 }}>
-          <Typography variant="h4" align="center" gutterBottom fontWeight="bold">
-            Trading Platform
-          </Typography>
-          <Typography variant="body2" align="center" color="text.secondary" sx={{ mb: 3 }}>
-            Create your account
-          </Typography>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-          <Box component="form" onSubmit={handleSubmit}>
-            <TextField
-              label="Username"
-              name="username"
-              fullWidth
-              margin="normal"
-              value={formData.username}
-              onChange={handleChange}
-              required
-              autoFocus
-            />
-            <Box sx={{ display: 'flex', gap: 2 }}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2.5 }}>
+          {error}
+        </Alert>
+      )}
+
+      <Box component="form" onSubmit={handleSubmit} noValidate>
+        <Stack spacing={2}>
+          <TextField
+            label="Username"
+            name="username"
+            value={form.username}
+            onChange={handleChange}
+            error={Boolean(fieldErrors.username)}
+            helperText={fieldErrors.username}
+            autoComplete="username"
+            autoFocus
+            required
+            fullWidth
+          />
+
+          <Grid container spacing={1.5}>
+            <Grid size={{ xs: 6 }}>
               <TextField
-                label="First Name"
+                label="First name"
                 name="firstName"
-                fullWidth
-                margin="normal"
-                value={formData.firstName}
+                value={form.firstName}
                 onChange={handleChange}
+                error={Boolean(fieldErrors.firstName)}
+                helperText={fieldErrors.firstName}
+                autoComplete="given-name"
+                required
+                fullWidth
               />
+            </Grid>
+            <Grid size={{ xs: 6 }}>
               <TextField
-                label="Last Name"
+                label="Last name"
                 name="lastName"
-                fullWidth
-                margin="normal"
-                value={formData.lastName}
+                value={form.lastName}
                 onChange={handleChange}
+                error={Boolean(fieldErrors.lastName)}
+                helperText={fieldErrors.lastName}
+                autoComplete="family-name"
+                required
+                fullWidth
               />
-            </Box>
-            <TextField
-              label="Email"
-              type="email"
-              name="email"
-              fullWidth
-              margin="normal"
-              value={formData.email}
-              onChange={handleChange}
-              required
-            />
+            </Grid>
+          </Grid>
+
+          <TextField
+            label="Email"
+            name="email"
+            type="email"
+            value={form.email}
+            onChange={handleChange}
+            error={Boolean(fieldErrors.email)}
+            helperText={fieldErrors.email}
+            autoComplete="email"
+            required
+            fullWidth
+          />
+
+          <Box>
             <TextField
               label="Password"
-              type={showPassword ? 'text' : 'password'}
               name="password"
-              fullWidth
-              margin="normal"
-              value={formData.password}
+              type={showPassword ? 'text' : 'password'}
+              value={form.password}
               onChange={handleChange}
+              error={Boolean(fieldErrors.password)}
+              helperText={fieldErrors.password}
+              autoComplete="new-password"
               required
+              fullWidth
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
-                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    <IconButton
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      edge="end"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
                     </IconButton>
                   </InputAdornment>
                 ),
               }}
             />
-            <Button type="submit" variant="contained" fullWidth size="large" sx={{ mt: 3 }} disabled={loading}>
-              {loading ? 'Creating Account...' : 'Sign Up'}
-            </Button>
+            {form.password && (
+              <Box sx={{ mt: 1 }}>
+                <LinearProgress variant="determinate" value={strength.score} color={strength.color} />
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
+                  <Box
+                    component="span"
+                    sx={{ typography: 'caption', color: `${strength.color}.main`, fontWeight: 600 }}
+                  >
+                    {strength.label}
+                  </Box>
+                </Box>
+              </Box>
+            )}
           </Box>
-          <Box sx={{ mt: 3, textAlign: 'center' }}>
-            <Typography variant="body2">
-              Already have an account? <NavLink to="/login" style={{ color: 'primary.main' }}>Sign In</NavLink>
-            </Typography>
-          </Box>
-        </CardContent>
-      </Card>
-    </Box>
+
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            fullWidth
+            disabled={submitting}
+            startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : null}
+            sx={{ mt: 0.5 }}
+          >
+            {submitting ? 'Creating account…' : 'Create account'}
+          </Button>
+        </Stack>
+      </Box>
+    </AuthLayout>
   );
 }
+

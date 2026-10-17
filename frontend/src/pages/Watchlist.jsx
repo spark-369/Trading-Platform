@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Card,
@@ -6,27 +6,22 @@ import {
   Typography,
   TextField,
   Button,
-  CircularProgress,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
   Grid,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   IconButton,
-  FormControl,
-  InputLabel,
-  Select,
+  Tooltip,
+  Stack,
   MenuItem,
+  Divider,
 } from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import AddIcon from '@mui/icons-material/AddRounded';
+import DeleteIcon from '@mui/icons-material/DeleteOutlineRounded';
+import CloseIcon from '@mui/icons-material/CloseRounded';
+import StarIcon from '@mui/icons-material/StarRounded';
+import { useSnackbar } from 'notistack';
 import {
   getWatchlists,
   createWatchlist,
@@ -34,220 +29,332 @@ import {
   addWatchlistItem,
   removeWatchlistItem,
   getMarketData,
-  getAllWatchlists,
   getWatchlistsByUser,
   getAllUsers,
 } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { PageHeader, EmptyState, ConfirmDialog, ErrorState } from '../components/ui';
+import { formatDate, normalizeSymbol } from '../utils/format';
+import { getErrorMessage } from '../utils/errors';
 
 export default function Watchlist() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('ROLE_ADMIN');
+  const { enqueueSnackbar } = useSnackbar();
+
   const [watchlists, setWatchlists] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [openCreate, setOpenCreate] = useState(false);
-  const [newWatchlistName, setNewWatchlistName] = useState('');
-  const [addingSymbol, setAddingSymbol] = useState({ watchlistId: null, symbol: '' });
+  const [error, setError] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [symbolDrafts, setSymbolDrafts] = useState({});
   const [users, setUsers] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
-  useEffect(() => {
-    loadWatchlists();
-    if (isAdmin) {
-      loadUsers();
-    }
-  }, [isAdmin, selectedUserId]);
+  const readOnly = Boolean(isAdmin && selectedUserId);
 
-  const loadWatchlists = async () => {
+  const loadWatchlists = useCallback(async () => {
     setLoading(true);
-    setError('');
+    setError(null);
     try {
-      const data = isAdmin && selectedUserId ? await getWatchlistsByUser(selectedUserId) : await getWatchlists();
+      const data =
+        isAdmin && selectedUserId
+          ? await getWatchlistsByUser(selectedUserId)
+          : await getWatchlists();
       setWatchlists(data);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load watchlists');
+      setError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAdmin, selectedUserId]);
 
-  const loadUsers = async () => {
+  useEffect(() => {
+    loadWatchlists();
+  }, [loadWatchlists]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    getAllUsers()
+      .then(setUsers)
+      .catch((err) => console.error('Failed to load users', err));
+  }, [isAdmin]);
+
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    if (!newName.trim()) return;
+    setCreating(true);
     try {
-      const data = await getAllUsers();
-      setUsers(data);
+      await createWatchlist(newName.trim());
+      enqueueSnackbar('Watchlist created', { variant: 'success' });
+      setNewName('');
+      setCreateOpen(false);
+      loadWatchlists();
     } catch (err) {
-      console.error('Failed to load users', err);
+      enqueueSnackbar(getErrorMessage(err, 'Failed to create watchlist'), { variant: 'error' });
+    } finally {
+      setCreating(false);
     }
   };
 
-  const handleCreateWatchlist = async (e) => {
-    e.preventDefault();
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await createWatchlist(newWatchlistName);
-      setNewWatchlistName('');
-      setOpenCreate(false);
+      await deleteWatchlist(deleteTarget.id);
+      enqueueSnackbar(`"${deleteTarget.name}" deleted`, { variant: 'success' });
       loadWatchlists();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to create watchlist');
-    }
-  };
-
-  const handleDeleteWatchlist = async (id) => {
-    if (!window.confirm('Delete this watchlist?')) return;
-    try {
-      await deleteWatchlist(id);
-      loadWatchlists();
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete watchlist');
+      enqueueSnackbar(getErrorMessage(err, 'Failed to delete watchlist'), { variant: 'error' });
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
   const handleAddItem = async (watchlistId) => {
-    if (!addingSymbol.symbol) return;
+    const symbol = normalizeSymbol(symbolDrafts[watchlistId] ?? '');
+    if (!symbol) return;
     try {
-      const marketData = await getMarketData(addingSymbol.symbol);
-      await addWatchlistItem(watchlistId, addingSymbol.symbol, marketData.companyName);
-      setAddingSymbol({ watchlistId: null, symbol: '' });
+      const quote = await getMarketData(symbol);
+      await addWatchlistItem(watchlistId, symbol, quote.companyName);
+      setSymbolDrafts((prev) => ({ ...prev, [watchlistId]: '' }));
+      enqueueSnackbar(`${symbol} added`, { variant: 'success' });
       loadWatchlists();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to add item');
+      enqueueSnackbar(getErrorMessage(err, 'Failed to add symbol'), { variant: 'error' });
     }
   };
 
   const handleRemoveItem = async (watchlistId, symbol) => {
     try {
       await removeWatchlistItem(watchlistId, symbol);
+      enqueueSnackbar(`${symbol} removed`, { variant: 'success' });
       loadWatchlists();
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to remove item');
+      enqueueSnackbar(getErrorMessage(err, 'Failed to remove symbol'), { variant: 'error' });
     }
   };
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" fontWeight="bold">
-          Watchlists
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-          {isAdmin && (
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel>Select User</InputLabel>
-              <Select
+      <PageHeader
+        title="Watchlists"
+        subtitle="Track the instruments you care about most."
+        breadcrumbs={[{ label: 'Trading' }, { label: 'Watchlist' }]}
+        actions={
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            {isAdmin && (
+              <TextField
+                select
+                label="Viewing"
                 value={selectedUserId}
-                label="Select User"
-                onChange={(e) => setSelectedUserId(e.target.value)}
+                onChange={(event) => setSelectedUserId(event.target.value)}
+                sx={{ minWidth: 190 }}
               >
-                <MenuItem value="">My Watchlists</MenuItem>
+                <MenuItem value="">My watchlists</MenuItem>
                 {users.map((user) => (
-                  <MenuItem key={user.id} value={user.id}>{user.username}</MenuItem>
+                  <MenuItem key={user.id} value={user.id}>
+                    {user.username}
+                  </MenuItem>
                 ))}
-              </Select>
-            </FormControl>
-          )}
-          {(!isAdmin || !selectedUserId) && (
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenCreate(true)}>
-              New Watchlist
-            </Button>
-          )}
-        </Box>
-      </Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {watchlists.length === 0 ? (
-        <Alert severity="info">No watchlists created yet. Create one to get started.</Alert>
+              </TextField>
+            )}
+            {!readOnly && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                onClick={() => setCreateOpen(true)}
+              >
+                New watchlist
+              </Button>
+            )}
+          </Stack>
+        }
+      />
+
+      {error ? (
+        <ErrorState error={error} title="Could not load watchlists" onRetry={loadWatchlists} />
+      ) : watchlists.length === 0 ? (
+        <Card>
+          <EmptyState
+            title="No watchlists yet"
+            description="Create a watchlist to group instruments you want to monitor."
+            icon={<StarIcon />}
+            actionLabel={readOnly ? undefined : 'Create watchlist'}
+            onAction={readOnly ? undefined : () => setCreateOpen(true)}
+          />
+        </Card>
       ) : (
-        <Grid container spacing={3}>
+        <Grid container spacing={2.5}>
           {watchlists.map((watchlist) => (
-            <Grid size={{ xs: 12, md: 6 }} key={watchlist.id}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Typography variant="h6" fontWeight="bold">
-                      {watchlist.name}
-                    </Typography>
-                    {(!isAdmin || !selectedUserId) && (
-                      <IconButton size="small" color="error" onClick={() => handleDeleteWatchlist(watchlist.id)}>
-                        <DeleteIcon />
-                      </IconButton>
+            <Grid key={watchlist.id} size={{ xs: 12, lg: 6 }}>
+              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <CardContent sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between',
+                      mb: 1.5,
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="h6">{watchlist.name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {watchlist.items?.length ?? 0} instrument
+                        {(watchlist.items?.length ?? 0) === 1 ? '' : 's'} · created{' '}
+                        {formatDate(watchlist.createdAt)}
+                      </Typography>
+                    </Box>
+                    {!readOnly && (
+                      <Tooltip title="Delete watchlist">
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => setDeleteTarget(watchlist)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                     )}
                   </Box>
-                  {watchlist.items?.length === 0 ? (
-                    <Typography color="text.secondary" variant="body2">No items in this watchlist</Typography>
+
+                  <Divider sx={{ mb: 1.5 }} />
+
+                  {!watchlist.items?.length ? (
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ py: 2, textAlign: 'center' }}
+                      >
+                        No symbols yet — add one below.
+                      </Typography>
+                    </Box>
                   ) : (
-                    <TableContainer component={Paper} elevation={0}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Symbol</TableCell>
-                            <TableCell>Company</TableCell>
-                            <TableCell align="center">Action</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {watchlist.items.map((item) => (
-                            <TableRow key={item.id} hover>
-                              <TableCell component="th" scope="row" fontWeight="bold">
-                                {item.symbol}
-                              </TableCell>
-                              <TableCell>{item.companyName}</TableCell>
-                              <TableCell align="center">
-                                <IconButton size="small" color="error" onClick={() => handleRemoveItem(watchlist.id, item.symbol)}>
-                                  <DeleteIcon fontSize="small" />
-                                </IconButton>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
+                    <Stack spacing={0} sx={{ flexGrow: 1 }}>
+                      {watchlist.items.map((item) => (
+                        <Box
+                          key={item.id}
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1.5,
+                            py: 1,
+                            borderBottom: 1,
+                            borderColor: 'divider',
+                            '&:last-of-type': { borderBottom: 0 },
+                          }}
+                        >
+                          <Typography variant="body2" fontWeight={700} sx={{ minWidth: 56 }}>
+                            {item.symbol}
+                          </Typography>
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            noWrap
+                            sx={{ flexGrow: 1, minWidth: 0 }}
+                          >
+                            {item.companyName || '—'}
+                          </Typography>
+                          {!readOnly && (
+                            <Tooltip title="Remove">
+                              <IconButton
+                                size="small"
+                                color="error"
+                                onClick={() => handleRemoveItem(watchlist.id, item.symbol)}
+                              >
+                                <DeleteIcon sx={{ fontSize: 16 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
+                      ))}
+                    </Stack>
                   )}
-                  <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
-                    <TextField
-                      size="small"
-                      placeholder="Symbol (e.g., AAPL)"
-                      value={addingSymbol.watchlistId === watchlist.id ? addingSymbol.symbol : ''}
-                      onChange={(e) => setAddingSymbol({ watchlistId: watchlist.id, symbol: e.target.value.toUpperCase() })}
-                      sx={{ flexGrow: 1 }}
-                    />
-                    <Button size="small" variant="outlined" onClick={() => handleAddItem(watchlist.id)}>
-                      Add
-                    </Button>
-                  </Box>
+
+                  {!readOnly && (
+                    <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                      <TextField
+                        size="small"
+                        placeholder="Add symbol (e.g. AAPL)"
+                        value={symbolDrafts[watchlist.id] ?? ''}
+                        onChange={(event) =>
+                          setSymbolDrafts((prev) => ({
+                            ...prev,
+                            [watchlist.id]: normalizeSymbol(event.target.value),
+                          }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            handleAddItem(watchlist.id);
+                          }
+                        }}
+                        sx={{ flexGrow: 1 }}
+                      />
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleAddItem(watchlist.id)}
+                        disabled={!symbolDrafts[watchlist.id]}
+                      >
+                        Add
+                      </Button>
+                    </Box>
+                  )}
                 </CardContent>
               </Card>
             </Grid>
           ))}
         </Grid>
       )}
-      <Dialog open={openCreate} onClose={() => setOpenCreate(false)}>
-        <form onSubmit={handleCreateWatchlist}>
-          <DialogTitle>Create Watchlist</DialogTitle>
-          <DialogContent>
+
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          New watchlist
+          <IconButton size="small" onClick={() => setCreateOpen(false)}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <Box component="form" onSubmit={handleCreate}>
+          <DialogContent dividers>
             <TextField
-              label="Watchlist Name"
-              value={newWatchlistName}
-              onChange={(e) => setNewWatchlistName(e.target.value)}
+              label="Name"
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
               fullWidth
-              margin="normal"
               autoFocus
               required
+              placeholder="Tech leaders"
             />
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setOpenCreate(false)}>Cancel</Button>
-            <Button type="submit" variant="contained">Create</Button>
+          <DialogActions sx={{ px: 3, py: 2 }}>
+            <Button onClick={() => setCreateOpen(false)} color="inherit">
+              Cancel
+            </Button>
+            <Button type="submit" variant="contained" disabled={creating || !newName.trim()}>
+              {creating ? 'Creating…' : 'Create'}
+            </Button>
           </DialogActions>
-        </form>
+        </Box>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete watchlist"
+        description={
+          deleteTarget
+            ? `"${deleteTarget.name}" and all of its tracked symbols will be removed.`
+            : ''
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Box>
   );
 }
+

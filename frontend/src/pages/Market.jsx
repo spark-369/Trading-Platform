@@ -1,40 +1,25 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
-  Card,
-  CardContent,
   Typography,
   TextField,
   InputAdornment,
-  CircularProgress,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  IconButton,
   Button,
+  IconButton,
+  Grid,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Grid,
-  Chip,
-} from "@mui/material";
-import {
-  Search as SearchIcon,
-  StarBorder as StarBorderIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Add as AddIcon,
-} from "@mui/icons-material";
+  Tooltip,
+} from '@mui/material';
+import SearchIcon from '@mui/icons-material/SearchRounded';
+import StarBorderIcon from '@mui/icons-material/StarBorderRounded';
+import EditIcon from '@mui/icons-material/EditRounded';
+import DeleteIcon from '@mui/icons-material/DeleteOutlineRounded';
+import AddIcon from '@mui/icons-material/AddRounded';
+import CloseIcon from '@mui/icons-material/CloseRounded';
+import { useSnackbar } from 'notistack';
 import {
   getAllMarketData,
   searchMarketData,
@@ -43,432 +28,429 @@ import {
   createMarketData,
   updateMarketData,
   deleteMarketData,
-} from "../api";
-import { useAuth } from "../context/AuthContext";
+} from '../api';
+import { useAuth } from '../context/AuthContext';
+import { PageHeader, DataTable, TrendValue, SymbolChip, ConfirmDialog } from '../components/ui';
+import { formatCurrency, formatCompact, normalizeSymbol } from '../utils/format';
+import { getErrorMessage } from '../utils/errors';
+
+const emptyForm = {
+  symbol: '',
+  companyName: '',
+  currentPrice: '',
+  openPrice: '',
+  highPrice: '',
+  lowPrice: '',
+  previousClose: '',
+  volume: '',
+  change: '',
+  changePercent: '',
+};
 
 export default function Market() {
   const { hasRole } = useAuth();
-  const isAdmin = hasRole("ROLE_ADMIN");
+  const isAdmin = hasRole('ROLE_ADMIN');
+  const { enqueueSnackbar } = useSnackbar();
+
   const [marketData, setMarketData] = useState([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(null);
   const [watchlists, setWatchlists] = useState([]);
-  const [selectedWatchlist, setSelectedWatchlist] = useState("");
+  const [selectedWatchlist, setSelectedWatchlist] = useState('');
 
-  const [openForm, setOpenForm] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [formData, setFormData] = useState({
-    symbol: "",
-    companyName: "",
-    currentPrice: "",
-    openPrice: "",
-    highPrice: "",
-    lowPrice: "",
-    previousClose: "",
-    volume: "",
-    change: "",
-    changePercent: "",
-  });
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
-  useEffect(() => {
-    loadMarketData();
-    loadWatchlists();
-  }, []);
-
-  const loadMarketData = async () => {
+  const loadMarketData = useCallback(async () => {
     setLoading(true);
-    setError("");
+    setError(null);
     try {
       const data = await getAllMarketData();
       setMarketData(data);
     } catch (err) {
-      setError(err.response?.data?.message || "Failed to load market data");
+      setError(err);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadWatchlists = async () => {
+  const loadWatchlists = useCallback(async () => {
     try {
       const data = await getWatchlists();
       setWatchlists(data);
+      if (data.length > 0) {
+        setSelectedWatchlist((prev) => prev || String(data[0].id));
+      }
     } catch (err) {
-      console.error("Failed to load watchlists", err);
+      // Non fatal: the page still works without a watchlist selected.
+      console.error('Failed to load watchlists', err);
     }
-  };
+  }, []);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchQuery) {
+  useEffect(() => {
+    loadMarketData();
+    loadWatchlists();
+  }, [loadMarketData, loadWatchlists]);
+
+  const handleSearch = async (event) => {
+    event?.preventDefault();
+    const query = searchQuery.trim();
+    if (!query) {
       loadMarketData();
       return;
     }
     setLoading(true);
+    setError(null);
     try {
-      const data = await searchMarketData(searchQuery);
+      const data = await searchMarketData(query);
       setMarketData(data);
     } catch (err) {
-      setError(err.response?.data?.message || "Search failed");
+      setError(err);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddToWatchlist = async (symbol, companyName) => {
+  const handleAddToWatchlist = async (item) => {
     if (!selectedWatchlist) {
-      alert("Please select a watchlist first");
+      enqueueSnackbar('Select a watchlist first.', { variant: 'warning' });
       return;
     }
     try {
-      await addWatchlistItem(selectedWatchlist, symbol, companyName);
-      alert("Added to watchlist");
+      await addWatchlistItem(selectedWatchlist, item.symbol, item.companyName);
+      enqueueSnackbar(`${item.symbol} added to watchlist`, { variant: 'success' });
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to add to watchlist");
+      enqueueSnackbar(getErrorMessage(err, 'Failed to add to watchlist'), { variant: 'error' });
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      symbol: "",
-      companyName: "",
-      currentPrice: "",
-      openPrice: "",
-      highPrice: "",
-      lowPrice: "",
-      previousClose: "",
-      volume: "",
-      change: "",
-      changePercent: "",
-    });
+  const openCreate = () => {
     setEditingItem(null);
+    setForm(emptyForm);
+    setFormOpen(true);
   };
 
-  const handleOpenCreate = () => {
-    resetForm();
-    setOpenForm(true);
-  };
-
-  const handleOpenEdit = (item) => {
+  const openEdit = (item) => {
     setEditingItem(item);
-    setFormData({
-      symbol: item.symbol,
-      companyName: item.companyName || "",
-      currentPrice: item.currentPrice?.toString() || "",
-      openPrice: item.openPrice?.toString() || "",
-      highPrice: item.highPrice?.toString() || "",
-      lowPrice: item.lowPrice?.toString() || "",
-      previousClose: item.previousClose?.toString() || "",
-      volume: item.volume?.toString() || "",
-      change: item.change?.toString() || "",
-      changePercent: item.changePercent?.toString() || "",
+    setForm({
+      symbol: item.symbol ?? '',
+      companyName: item.companyName ?? '',
+      currentPrice: item.currentPrice?.toString() ?? '',
+      openPrice: item.openPrice?.toString() ?? '',
+      highPrice: item.highPrice?.toString() ?? '',
+      lowPrice: item.lowPrice?.toString() ?? '',
+      previousClose: item.previousClose?.toString() ?? '',
+      volume: item.volume?.toString() ?? '',
+      change: item.change?.toString() ?? '',
+      changePercent: item.changePercent?.toString() ?? '',
     });
-    setOpenForm(true);
+    setFormOpen(true);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSave = async () => {
+    setSaving(true);
     const payload = {
-      symbol: formData.symbol,
-      companyName: formData.companyName,
-      currentPrice: parseFloat(formData.currentPrice),
-      openPrice: parseFloat(formData.openPrice),
-      highPrice: parseFloat(formData.highPrice),
-      lowPrice: parseFloat(formData.lowPrice),
-      previousClose: parseFloat(formData.previousClose),
-      volume: parseInt(formData.volume, 10),
-      change: parseFloat(formData.change),
-      changePercent: parseFloat(formData.changePercent),
+      symbol: normalizeSymbol(form.symbol),
+      companyName: form.companyName,
+      currentPrice: Number(form.currentPrice),
+      openPrice: Number(form.openPrice),
+      highPrice: Number(form.highPrice),
+      lowPrice: Number(form.lowPrice),
+      previousClose: Number(form.previousClose),
+      volume: parseInt(form.volume, 10),
+      change: Number(form.change),
+      changePercent: Number(form.changePercent),
     };
 
     try {
       if (editingItem) {
         await updateMarketData(editingItem.symbol, payload);
+        enqueueSnackbar(`${payload.symbol} updated`, { variant: 'success' });
       } else {
         await createMarketData(payload);
+        enqueueSnackbar(`${payload.symbol} created`, { variant: 'success' });
       }
-      setOpenForm(false);
+      setFormOpen(false);
       loadMarketData();
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to save market data");
+      enqueueSnackbar(getErrorMessage(err, 'Failed to save market data'), { variant: 'error' });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDelete = async (symbol) => {
-    if (!window.confirm(`Delete market data for ${symbol}?`)) return;
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteMarketData(symbol);
+      await deleteMarketData(deleteTarget.symbol);
+      enqueueSnackbar(`${deleteTarget.symbol} removed`, { variant: 'success' });
       loadMarketData();
     } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete market data");
+      enqueueSnackbar(getErrorMessage(err, 'Failed to delete market data'), { variant: 'error' });
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
-  if (loading) {
-    return (
-      <Box
-        display="flex"
-        justifyContent="center"
-        alignItems="center"
-        minHeight="50vh"
-      >
-        <CircularProgress />
-      </Box>
-    );
-  }
+
+  const columns = useMemo(
+    () => [
+      {
+        key: 'symbol',
+        label: 'Instrument',
+        width: 230,
+        render: (row) => <SymbolChip symbol={row.symbol} companyName={row.companyName} />,
+      },
+      {
+        key: 'currentPrice',
+        label: 'Price',
+        align: 'right',
+        render: (row) => (
+          <Typography variant="body2" fontWeight={600} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {formatCurrency(row.currentPrice)}
+          </Typography>
+        ),
+      },
+      {
+        key: 'change',
+        label: 'Change',
+        align: 'right',
+        render: (row) => (
+          <TrendValue value={row.change} changePercent={row.changePercent} size="body2" />
+        ),
+      },
+      { key: 'openPrice', label: 'Open', align: 'right', render: (row) => formatCurrency(row.openPrice) },
+      { key: 'highPrice', label: 'High', align: 'right', render: (row) => formatCurrency(row.highPrice) },
+      { key: 'lowPrice', label: 'Low', align: 'right', render: (row) => formatCurrency(row.lowPrice) },
+      {
+        key: 'previousClose',
+        label: 'Prev close',
+        align: 'right',
+        render: (row) => formatCurrency(row.previousClose),
+      },
+      { key: 'volume', label: 'Volume', align: 'right', render: (row) => formatCompact(row.volume) },
+      {
+        key: 'actions',
+        label: 'Actions',
+        align: 'right',
+        width: isAdmin ? 132 : 64,
+        render: (row) => (
+          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
+            <Tooltip title={selectedWatchlist ? 'Add to watchlist' : 'Select a watchlist first'}>
+              <span>
+                <IconButton
+                  size="small"
+                  disabled={!selectedWatchlist}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleAddToWatchlist(row);
+                  }}
+                >
+                  <StarBorderIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            {isAdmin && (
+              <>
+                <Tooltip title="Edit">
+                  <IconButton
+                    size="small"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openEdit(row);
+                    }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Delete">
+                  <IconButton
+                    size="small"
+                    color="error"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDeleteTarget(row);
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </>
+            )}
+          </Box>
+        ),
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isAdmin, selectedWatchlist]
+  );
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" gutterBottom fontWeight="bold" sx={{ mb: 0 }}>
-          Market Data
-        </Typography>
-        {isAdmin && (
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleOpenCreate}
-          >
-            Add Market Data
-          </Button>
-        )}
-      </Box>
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
-      <Box sx={{ mb: 3, display: "flex", gap: 2, alignItems: "flex-end" }}>
-        <Box
-          component="form"
-          onSubmit={handleSearch}
-          sx={{ display: "flex", gap: 2, flexGrow: 1 }}
-        >
-          <TextField
-            label="Search Symbol or Company"
-            variant="outlined"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            sx={{ flexGrow: 1 }}
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton onClick={handleSearch} type="submit">
-                    <SearchIcon />
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
-          />
-          <Button variant="outlined" onClick={loadMarketData}>
-            Reset
-          </Button>
-        </Box>
-        <TextField
-          select
-          value={selectedWatchlist}
-          onChange={(e) => setSelectedWatchlist(e.target.value)}
-          sx={{ minWidth: 280 }}
-          SelectProps={{ native: true }}
-        >
-          <option value="">Select Watchlist</option>
-          {watchlists.map((wl) => (
-            <option key={wl.id} value={wl.id}>
-              {wl.name}
-            </option>
-          ))}
-        </TextField>
-      </Box>
-      <Card>
-        <CardContent>
-          <TableContainer component={Paper} elevation={0}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Symbol</TableCell>
-                  <TableCell>Company</TableCell>
-                  <TableCell align="right">Current Price</TableCell>
-                  <TableCell align="right">Change</TableCell>
-                  <TableCell align="right">Change %</TableCell>
-                  <TableCell align="right">Volume</TableCell>
-                  <TableCell align="center">Action</TableCell>
-                  {isAdmin && <TableCell align="center">Admin</TableCell>}
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {marketData.map((item) => (
-                  <TableRow key={item.symbol} hover>
-                    <TableCell component="th" scope="row" fontWeight="bold">
-                      {item.symbol}
-                    </TableCell>
-                    <TableCell>{item.companyName}</TableCell>
-                    <TableCell align="right">
-                      ${item.currentPrice?.toFixed(2)}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      style={{ color: item.change >= 0 ? "green" : "red" }}
-                    >
-                      {item.change >= 0 ? "+" : ""}
-                      {item.change?.toFixed(2)}
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      style={{
-                        color: item.changePercent >= 0 ? "green" : "red",
-                      }}
-                    >
-                      {item.changePercent >= 0 ? "+" : ""}
-                      {item.changePercent?.toFixed(2)}%
-                    </TableCell>
-                    <TableCell align="right">
-                      {item.volume?.toLocaleString()}
-                    </TableCell>
-                    <TableCell align="center">
-                      <IconButton
-                        size="small"
-                        onClick={() =>
-                          handleAddToWatchlist(item.symbol, item.companyName)
-                        }
-                        title="Add to Watchlist"
-                      >
-                        <StarBorderIcon />
-                      </IconButton>
-                    </TableCell>
-                    {isAdmin && (
-                      <TableCell align="center">
-                        <IconButton
-                          size="small"
-                          onClick={() => handleOpenEdit(item)}
-                          title="Edit"
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDelete(item.symbol)}
-                          title="Delete"
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </CardContent>
-      </Card>
+      <PageHeader
+        title="Market"
+        subtitle="Browse instruments, track quotes and build your watchlists."
+        actions={
+          isAdmin && (
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openCreate}>
+              Add instrument
+            </Button>
+          )
+        }
+      />
 
-      <Dialog open={openForm} onClose={() => setOpenForm(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{editingItem ? "Edit Market Data" : "Create Market Data"}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid size={{ xs: 12, md: 8 }}>
+          <Box component="form" onSubmit={handleSearch} sx={{ display: 'flex', gap: 1.5 }}>
             <TextField
-              label="Symbol"
-              value={formData.symbol}
-              onChange={(e) => setFormData({ ...formData, symbol: e.target.value.toUpperCase() })}
-              required
-              disabled={!!editingItem}
+              placeholder="Search by symbol or company"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              fullWidth
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon fontSize="small" sx={{ color: 'text.disabled' }} />
+                  </InputAdornment>
+                ),
+              }}
             />
-            <TextField
-              label="Company Name"
-              value={formData.companyName}
-              onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-              required
-            />
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Current Price"
-                  type="number"
-                  value={formData.currentPrice}
-                  onChange={(e) => setFormData({ ...formData, currentPrice: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Open Price"
-                  type="number"
-                  value={formData.openPrice}
-                  onChange={(e) => setFormData({ ...formData, openPrice: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="High Price"
-                  type="number"
-                  value={formData.highPrice}
-                  onChange={(e) => setFormData({ ...formData, highPrice: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Low Price"
-                  type="number"
-                  value={formData.lowPrice}
-                  onChange={(e) => setFormData({ ...formData, lowPrice: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Previous Close"
-                  type="number"
-                  value={formData.previousClose}
-                  onChange={(e) => setFormData({ ...formData, previousClose: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Volume"
-                  type="number"
-                  value={formData.volume}
-                  onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Change"
-                  type="number"
-                  value={formData.change}
-                  onChange={(e) => setFormData({ ...formData, change: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-              <Grid size={{ xs: 6 }}>
-                <TextField
-                  label="Change %"
-                  type="number"
-                  value={formData.changePercent}
-                  onChange={(e) => setFormData({ ...formData, changePercent: e.target.value })}
-                  required
-                  inputProps={{ step: "0.01" }}
-                />
-              </Grid>
-            </Grid>
+            <Button type="submit" variant="outlined" sx={{ flexShrink: 0 }}>
+              Search
+            </Button>
+            <Button
+              variant="text"
+              color="inherit"
+              sx={{ flexShrink: 0 }}
+              onClick={() => {
+                setSearchQuery('');
+                loadMarketData();
+              }}
+            >
+              Reset
+            </Button>
           </Box>
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <TextField
+            select
+            fullWidth
+            label="Watchlist"
+            value={selectedWatchlist}
+            onChange={(event) => setSelectedWatchlist(event.target.value)}
+            slotProps={{ select: { native: true } }}
+            helperText={watchlists.length === 0 ? 'Create a watchlist to save instruments' : undefined}
+          >
+            <option value="">Select watchlist</option>
+            {watchlists.map((watchlist) => (
+              <option key={watchlist.id} value={watchlist.id}>
+                {watchlist.name}
+              </option>
+            ))}
+          </TextField>
+        </Grid>
+      </Grid>
+
+      <DataTable
+        columns={columns}
+        rows={marketData}
+        loading={loading}
+        emptyTitle={error ? 'Could not load market data' : 'No instruments found'}
+        emptyDescription={
+          error
+            ? getErrorMessage(error)
+            : isAdmin
+              ? 'Add an instrument to start populating the market.'
+              : 'Try a different search term.'
+        }
+        getRowKey={(row) => row.symbol}
+        initialRowsPerPage={10}
+      />
+
+      <Dialog open={formOpen} onClose={() => setFormOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {editingItem ? `Edit ${editingItem.symbol}` : 'Add instrument'}
+          <IconButton size="small" onClick={() => setFormOpen(false)}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={2}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="Symbol"
+                fullWidth
+                required
+                value={form.symbol}
+                disabled={Boolean(editingItem)}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, symbol: normalizeSymbol(event.target.value) }))
+                }
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="Company name"
+                fullWidth
+                value={form.companyName}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, companyName: event.target.value }))
+                }
+              />
+            </Grid>
+            {[
+              ['currentPrice', 'Current price'],
+              ['openPrice', 'Open'],
+              ['highPrice', 'High'],
+              ['lowPrice', 'Low'],
+              ['previousClose', 'Previous close'],
+              ['volume', 'Volume'],
+              ['change', 'Change'],
+              ['changePercent', 'Change %'],
+            ].map(([field, label]) => (
+              <Grid key={field} size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label={label}
+                  type="number"
+                  fullWidth
+                  value={form[field]}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, [field]: event.target.value }))
+                  }
+                  inputProps={field === 'volume' ? { step: 1 } : { step: '0.01' }}
+                />
+              </Grid>
+            ))}
+          </Grid>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenForm(false)}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">
-            {editingItem ? "Update" : "Create"}
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setFormOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} variant="contained" disabled={saving || !form.symbol}>
+            {saving ? 'Saving…' : editingItem ? 'Save changes' : 'Create'}
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete instrument"
+        description={
+          deleteTarget
+            ? `Market data for ${deleteTarget.symbol} will be permanently removed. Orders already placed are not affected.`
+            : ''
+        }
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </Box>
   );
 }
+

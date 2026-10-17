@@ -9,6 +9,8 @@ import com.ftp.backend.dto.response.WatchlistResponse;
 import com.ftp.backend.entity.User;
 import com.ftp.backend.entity.Watchlist;
 import com.ftp.backend.entity.WatchlistItem;
+import com.ftp.backend.exception.ConflictException;
+import com.ftp.backend.exception.NotFoundException;
 import com.ftp.backend.repository.WatchlistItemRepository;
 import com.ftp.backend.repository.WatchlistRepository;
 import com.ftp.backend.service.WatchlistService;
@@ -56,11 +58,11 @@ public class WatchlistServiceImpl implements WatchlistService {
     public WatchlistResponse addItem(Long userId, Long watchlistId, String symbol, String companyName) {
         Watchlist watchlist = watchlistRepository.findByIdAndUserId(watchlistId, userId);
         if (watchlist == null) {
-            throw new RuntimeException("Watchlist not found");
+            throw new NotFoundException("Watchlist not found");
         }
         Optional<WatchlistItem> existing = watchlistItemRepository.findByWatchlistIdAndSymbol(watchlistId, symbol);
         if (existing.isPresent()) {
-            throw new RuntimeException("Symbol already in watchlist");
+            throw new ConflictException("Symbol already in watchlist");
         }
         WatchlistItem item = WatchlistItem.builder()
                 .watchlist(watchlist)
@@ -76,7 +78,7 @@ public class WatchlistServiceImpl implements WatchlistService {
     public WatchlistResponse removeItem(Long userId, Long watchlistId, String symbol) {
         Watchlist watchlist = watchlistRepository.findByIdAndUserId(watchlistId, userId);
         if (watchlist == null) {
-            throw new RuntimeException("Watchlist not found");
+            throw new NotFoundException("Watchlist not found");
         }
         watchlistItemRepository.findByWatchlistIdAndSymbol(watchlistId, symbol)
                 .ifPresent(watchlistItemRepository::delete);
@@ -88,7 +90,7 @@ public class WatchlistServiceImpl implements WatchlistService {
     public void deleteWatchlist(Long userId, Long watchlistId) {
         Watchlist watchlist = watchlistRepository.findByIdAndUserId(watchlistId, userId);
         if (watchlist == null) {
-            throw new RuntimeException("Watchlist not found");
+            throw new NotFoundException("Watchlist not found");
         }
         watchlistItemRepository.findByWatchlistId(watchlistId).forEach(watchlistItemRepository::delete);
         watchlistRepository.delete(watchlist);

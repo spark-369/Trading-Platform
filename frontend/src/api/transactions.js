@@ -1,8 +1,8 @@
 import api from './api';
 
 export const getTransactionHistory = async (userId) => {
-  const params = userId ? { params: { userId } } : {};
-  const response = await api.get('/transactions/history', params);
+  const config = userId ? { params: { userId } } : {};
+  const response = await api.get('/transactions/history', config);
   return response.data;
 };
 

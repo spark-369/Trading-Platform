@@ -1,17 +1,13 @@
 import { Navigate, useLocation } from 'react-router-dom';
-import { CircularProgress, Box } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
+import { SessionLoader } from './ProtectedRoute';
 
 export default function AdminRoute({ children }) {
   const { user, loading, hasRole } = useAuth();
   const location = useLocation();
 
   if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
-        <CircularProgress />
-      </Box>
-    );
+    return <SessionLoader />;
   }
 
   if (!user || !hasRole('ROLE_ADMIN')) {
@@ -20,3 +16,4 @@ export default function AdminRoute({ children }) {
 
   return children;
 }
+

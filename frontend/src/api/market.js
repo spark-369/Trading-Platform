@@ -11,7 +11,7 @@ export const getAllMarketData = async () => {
 };
 
 export const searchMarketData = async (query) => {
-  const response = await api.get(`/market/search?query=${query}`);
+  const response = await api.get('/market/search', { params: { query } });
   return response.data;
 };
 

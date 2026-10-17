@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 
 import com.ftp.backend.dto.response.MarketDataResponse;
 import com.ftp.backend.entity.MarketData;
+import com.ftp.backend.exception.NotFoundException;
 import com.ftp.backend.repository.MarketDataRepository;
 import com.ftp.backend.service.MarketDataService;
 
@@ -23,7 +24,7 @@ public class MarketDataServiceImpl implements MarketDataService {
     @Override
     public MarketDataResponse getMarketData(String symbol) {
         MarketData marketData = marketDataRepository.findBySymbol(symbol)
-                .orElseThrow(() -> new RuntimeException("Market data not found for symbol: " + symbol));
+                .orElseThrow(() -> new NotFoundException("Market data not found for symbol: " + symbol));
         return mapToMarketDataResponse(marketData);
     }
 
@@ -56,7 +57,7 @@ public class MarketDataServiceImpl implements MarketDataService {
     @Override
     public MarketDataResponse updateMarketData(String symbol, MarketData marketData) {
         MarketData existing = marketDataRepository.findBySymbol(symbol)
-                .orElseThrow(() -> new RuntimeException("Market data not found for symbol: " + symbol));
+                .orElseThrow(() -> new NotFoundException("Market data not found for symbol: " + symbol));
         existing.setCompanyName(marketData.getCompanyName());
         existing.setCurrentPrice(marketData.getCurrentPrice());
         existing.setOpenPrice(marketData.getOpenPrice());
@@ -73,7 +74,7 @@ public class MarketDataServiceImpl implements MarketDataService {
     @Override
     public void deleteMarketData(String symbol) {
         MarketData marketData = marketDataRepository.findBySymbol(symbol)
-                .orElseThrow(() -> new RuntimeException("Market data not found for symbol: " + symbol));
+                .orElseThrow(() -> new NotFoundException("Market data not found for symbol: " + symbol));
         marketDataRepository.delete(marketData);
     }
 

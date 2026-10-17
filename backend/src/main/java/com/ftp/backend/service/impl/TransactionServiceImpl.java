@@ -4,6 +4,8 @@ import org.springframework.stereotype.Service;
 
 import com.ftp.backend.dto.response.TransactionResponse;
 import com.ftp.backend.entity.Transaction;
+import com.ftp.backend.exception.ForbiddenActionException;
+import com.ftp.backend.exception.NotFoundException;
 import com.ftp.backend.repository.TransactionRepository;
 import com.ftp.backend.service.TransactionService;
 
@@ -29,9 +31,9 @@ public class TransactionServiceImpl implements TransactionService {
     @Override
     public TransactionResponse getTransaction(Long userId, Long transactionId) {
         Transaction transaction = transactionRepository.findById(transactionId)
-                .orElseThrow(() -> new RuntimeException("Transaction not found"));
+                .orElseThrow(() -> new NotFoundException("Transaction not found"));
         if (!transaction.getUser().getId().equals(userId)) {
-            throw new RuntimeException("Unauthorized");
+            throw new ForbiddenActionException("You are not allowed to view this transaction");
         }
         return mapToTransactionResponse(transaction);
     }
